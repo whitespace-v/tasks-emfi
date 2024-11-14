@@ -1,0 +1,3 @@
+Description: Create a command-line interface (CLI) application in Rust that takes a file path
+as input and counts the number of words, lines, and characters in the file. This task will help
+the intern learn about Rust's file handling, string manipulation, and error handling.
