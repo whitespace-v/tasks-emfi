@@ -1,8 +1,7 @@
-use std::sync::Arc;
-
 use crate::structs::{ApiResponse, Book, BroadcastMessage, Command, WsSession};
 use actix::Addr;
 use actix_web::web;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
