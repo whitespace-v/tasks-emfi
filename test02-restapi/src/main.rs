@@ -7,20 +7,8 @@ use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_web_actors::ws;
 use std::sync::Arc;
 use std::time::Instant;
-use structs::{ApiResponse, Book, BroadcastMessage, WsSession};
+use structs::{Book, WsSession};
 use tokio::sync::Mutex;
-
-async fn broadcast(
-    books: tokio::sync::MutexGuard<'_, Vec<Book>>,
-    sessions: web::Data<Arc<Mutex<Vec<Addr<WsSession>>>>>,
-) {
-    for session in sessions.lock().await.iter() {
-        session.do_send(BroadcastMessage(serde_json::to_string(&*books).unwrap()));
-    }
-}
-async fn response(addr: &Addr<WsSession>, body: ApiResponse) {
-    addr.do_send(BroadcastMessage(serde_json::to_string(&body).unwrap()));
-}
 
 async fn ws_handler(
     req: HttpRequest,

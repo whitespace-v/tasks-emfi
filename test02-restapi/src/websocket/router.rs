@@ -1,13 +1,22 @@
 use std::sync::Arc;
 
-use crate::{
-    broadcast, response,
-    structs::{ApiResponse, Book, BroadcastMessage, Command, WsSession},
-};
+use crate::structs::{ApiResponse, Book, BroadcastMessage, Command, WsSession};
 use actix::Addr;
 use actix_web::web;
 use tokio::sync::Mutex;
 use uuid::Uuid;
+
+async fn broadcast(
+    books: tokio::sync::MutexGuard<'_, Vec<Book>>,
+    sessions: web::Data<Arc<Mutex<Vec<Addr<WsSession>>>>>,
+) {
+    for session in sessions.lock().await.iter() {
+        session.do_send(BroadcastMessage(serde_json::to_string(&*books).unwrap()));
+    }
+}
+async fn response(addr: &Addr<WsSession>, body: ApiResponse) {
+    addr.do_send(BroadcastMessage(serde_json::to_string(&body).unwrap()));
+}
 
 pub fn obtain(
     cmd: Result<Command, serde_json::Error>,
