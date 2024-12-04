@@ -11,9 +11,9 @@ use uuid::Uuid;
 pub struct BroadcastMessage(pub String);
 
 #[derive(Serialize)]
-pub struct ApiResponse<'a> {
+pub struct ApiResponse {
     pub status: u16,
-    pub message: &'a str,
+    pub message: String,
 }
 
 pub struct WsSession {

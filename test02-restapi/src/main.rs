@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
 use uuid::Uuid;
+mod handler_router;
 mod structs;
 use structs::{ApiResponse, Book, BroadcastMessage, Command, WsSession};
 
@@ -21,18 +22,25 @@ impl WsSession {
     fn hb(&self, ctx: &mut ws::WebsocketContext<Self>) {
         ctx.ping(&[]);
     }
-    async fn broadcast_books(&self) {
-        let books = self.books.lock().await;
-        let books_json = serde_json::to_string(&*books).unwrap();
-        let sessions = self.sessions.lock().await;
-        for session in sessions.iter() {
-            session.do_send(BroadcastMessage(books_json.clone()));
-        }
-    }
-    fn send_response(&self, ctx: &mut ws::WebsocketContext<Self>, res_body: ApiResponse) {
-        let json = serde_json::to_string(&res_body).unwrap();
-        ctx.text(json);
-    }
+    // async fn broadcast_books(&self) {
+    //     let books = self.books.lock().await;
+    //     let books_json = serde_json::to_string(&*books).unwrap();
+    //     let sessions = self.sessions.lock().await;
+    //     for session in sessions.iter() {
+    //         session.do_send(BroadcastMessage(books_json.clone()));
+    //     }
+    // }
+    // async fn send_response(self: Arc<Self>, addr: Addr<WsSession>, res_body: ApiResponse) {
+    //     let json = serde_json::to_string(&res_body).unwrap();
+    //     addr.do_send(BroadcastMessage(json));
+    // }
+}
+async fn broadcast(addr: &Addr<WsSession>, books: tokio::sync::MutexGuard<'_, Vec<Book>>) {
+    addr.do_send(BroadcastMessage(serde_json::to_string(&*books).unwrap()));
+    //TODO: iterate sessions
+}
+async fn response(addr: &Addr<WsSession>, body: ApiResponse) {
+    addr.do_send(BroadcastMessage(serde_json::to_string(&body).unwrap()));
 }
 impl Actor for WsSession {
     type Context = ws::WebsocketContext<Self>;
@@ -66,17 +74,17 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsSession {
             Ok(ws::Message::Pong(_)) => self.hb = Instant::now(),
             Ok(ws::Message::Text(text)) => {
                 let command = serde_json::from_slice(text.as_ref());
+                // handler_router::router(commag);
                 match command {
                     Ok(Command::GetBooks) => {
                         let books = self.books.clone();
                         let addr = ctx.address();
                         actix::spawn(async move {
                             let books = books.lock().await;
-                            let books_json = serde_json::to_string(&*books).unwrap();
-                            addr.do_send(BroadcastMessage(books_json.clone()));
+                            // TODO: send
+                            broadcast(&addr, books).await;
                         });
                     }
-                    // broadcast
                     Ok(Command::AddBook { book }) => {
                         let books = self.books.clone();
                         let addr = ctx.address();
@@ -88,100 +96,121 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsSession {
                                 author: book.author,
                                 year: book.year,
                             });
-                            self.broadcast_books();
-                            self.send_response(
-                                addr,
+                            // TODO: send
+                            broadcast(&addr, books).await;
+                            // TODO: log
+                            response(
+                                &addr,
                                 ApiResponse {
                                     status: 201,
-                                    message: "The book was added successfully",
+                                    message: "The book was added successfully".to_owned(),
                                 },
                             )
+                            .await
                         });
                     }
                     Ok(Command::GetBook { id }) => {
                         let books = self.books.clone();
                         let addr = ctx.address();
                         actix::spawn(async move {
-                            let books = self.books.lock().await;
+                            let books = books.lock().await;
                             if let Some(book) = books.iter().find(|b| b.id == id) {
-                                let book_json = serde_json::to_string(&book).unwrap();
-                                ctx.text(book_json);
+                                // TODO: send
+                                addr.do_send(BroadcastMessage(
+                                    serde_json::to_string(&book).unwrap(),
+                                ));
                             } else {
-                                self.send_response(
-                                    ctx,
+                                // TODO: log
+                                response(
+                                    &addr,
                                     ApiResponse {
                                         status: 204,
-                                        message: "The book was not found",
+                                        message: "The book was not found".to_owned(),
                                     },
                                 )
+                                .await
                             }
                         });
                     }
-                    // broadcast
                     Ok(Command::UpdateBook { id, book }) => {
                         let books = self.books.clone();
                         let addr = ctx.address();
                         actix::spawn(async move {
-                            let mut books = self.books.lock().await;
+                            let mut books = books.lock().await;
                             if let Some(existing_book) = books.iter_mut().find(|b| b.id == id) {
                                 existing_book.title = book.title;
                                 existing_book.author = book.author;
                                 existing_book.year = book.year;
-                                self.send_response(
-                                    ctx,
+                                // TODO: send
+                                broadcast(&addr, books).await;
+                                // TODO: log
+                                response(
+                                    &addr,
                                     ApiResponse {
                                         status: 200,
-                                        message: "The book was updated",
-                                    },
-                                );
-                                drop(books);
-                                self.broadcast_books();
-                            } else {
-                                self.send_response(
-                                    ctx,
-                                    ApiResponse {
-                                        status: 204,
-                                        message: "The book was not found",
+                                        message: "The book was updated".to_owned(),
                                     },
                                 )
+                                .await
+                            } else {
+                                // TODO: log
+                                response(
+                                    &addr,
+                                    ApiResponse {
+                                        status: 204,
+                                        message: "The book was not found".to_owned(),
+                                    },
+                                )
+                                .await
                             }
                         });
                     }
-                    // broadcast
                     Ok(Command::DeleteBook { id }) => {
                         let books = self.books.clone();
                         let addr = ctx.address();
                         actix::spawn(async move {
-                            let mut books = self.books.lock().await;
+                            let mut books = books.lock().await;
                             if let Some(_) = books.iter().find(|b| b.id == id) {
                                 books.retain(|b| b.id != id);
-                                self.send_response(
-                                    ctx,
+                                // TODO: send
+                                broadcast(&addr, books).await;
+                                // TODO: log
+                                response(
+                                    &addr,
                                     ApiResponse {
                                         status: 200,
-                                        message: "The book was successfully deleted",
-                                    },
-                                );
-                                drop(books);
-                                self.broadcast_books();
-                            } else {
-                                self.send_response(
-                                    ctx,
-                                    ApiResponse {
-                                        status: 204,
-                                        message: "The book was not found",
+                                        message: "The book was successfully deleted".to_owned(),
                                     },
                                 )
+                                .await;
+                            } else {
+                                // TODO: log
+                                response(
+                                    &addr,
+                                    ApiResponse {
+                                        status: 204,
+                                        message: "The book was not found".to_owned(),
+                                    },
+                                )
+                                .await
                             }
                         });
                     }
-                    Err(_err) => self.send_response(
-                        ctx,
-                        ApiResponse {
-                            status: 405,
-                            message: "Incorrect Request",
-                        },
-                    ),
+                    Err(err) => {
+                        println!("{err:?}");
+                        // TODO: log
+                        let addr = ctx.address();
+                        actix::spawn(async move {
+                            response(
+                                &addr,
+                                ApiResponse {
+                                    status: 405,
+                                    message: "Incorrect Request".to_owned(),
+                                },
+                            )
+                            .await
+                        });
+                    }
                 }
             }
             Ok(ws::Message::Binary(bin)) => ctx.binary(bin),
@@ -210,14 +239,12 @@ async fn ws_handler(
 }
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let books = web::Data::new(Mutex::new(Vec::<Book>::new()));
-    let sessions = web::Data::new(Arc::new(Mutex::new(Vec::<Addr<WsSession>>::new())));
-    env_logger::init();
-
     HttpServer::new(move || {
         App::new()
-            .app_data(sessions.clone())
-            .app_data(books.clone())
+            .app_data(web::Data::new(Arc::new(Mutex::new(
+                Vec::<Addr<WsSession>>::new(),
+            ))))
+            .app_data(web::Data::new(Mutex::new(Vec::<Book>::new())))
             .route("/ws/", web::get().to(ws_handler))
     })
     .bind("127.0.0.1:8080")?
